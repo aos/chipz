@@ -1,8 +1,12 @@
 const std = @import("std");
 
 pub fn main() !void {
+    var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = aa.allocator();
+    defer aa.deinit();
+
     var c8 = Chip8.init(&font_set);
-    c8.execute(0xDFA3);
+    try c8.load(allocator, "roms/IBM_Logo.ch8");
 }
 
 const Chip8 = struct {
@@ -11,7 +15,6 @@ const Chip8 = struct {
     stack: [16]u16,
     key: [16]u8,
     pc: u16 = 0x200, // Program counter starts at 0x200
-    // opcode: u16,
     V: [16]u8,
     I: u16,
     sp: u16,
@@ -20,7 +23,7 @@ const Chip8 = struct {
     draw_flag: bool,
 
     pub fn init(fs: []const u8) Chip8 {
-        var c8 = std.mem.zeroes(Chip8);
+        var c8 = std.mem.zeroInit(Chip8, .{});
         // load font_set
         for (fs, 0x50..) |f, i| {
             c8.memory[i] = f;
@@ -29,8 +32,23 @@ const Chip8 = struct {
         return c8;
     }
 
+    pub fn load(self: *Chip8, allocator: std.mem.Allocator, rom_path: []const u8) !void {
+        const file = try std.fs.cwd().openFile(rom_path, .{});
+        defer file.close();
+        const stat = try file.stat();
+        const buf: []u8 = try file.readToEndAlloc(allocator, stat.size);
+
+        @memcpy(self.memory[self.pc .. self.pc + buf.len], buf);
+    }
+
+    fn start(self: *Chip8) void {
+        while (true) {
+            self.step();
+        }
+    }
+
     fn step(self: *Chip8) void {
-        const opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1];
+        const opcode = @as(u16, self.memory[self.pc]) << 8 | self.memory[self.pc + 1];
         self.pc += 2;
 
         self.execute(opcode);
@@ -183,4 +201,21 @@ test "ANNN" {
     var c8 = Chip8.init(&font_set);
     c8.execute(0xA345);
     try std.testing.expect(c8.I == 0x0345);
+}
+
+test "load rom into correct address" {
+    const rom_path = "roms/IBM_Logo.ch8";
+    var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = aa.allocator();
+    defer aa.deinit();
+
+    var c8 = Chip8.init(&font_set);
+    try c8.load(allocator, rom_path);
+
+    const file = try std.fs.cwd().openFile(rom_path, .{});
+    defer file.close();
+    const stat = try file.stat();
+    const rom_buf: []u8 = try file.readToEndAlloc(allocator, stat.size);
+
+    try std.testing.expectEqualSlices(u8, c8.memory[c8.pc .. c8.pc + rom_buf.len], rom_buf);
 }
