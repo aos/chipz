@@ -14,9 +14,15 @@ sp: u16,
 delay_timer: u8,
 sound_timer: u8,
 draw_flag: bool,
+config: Config = .{},
 
-pub fn init() Chip8 {
-    var c8 = std.mem.zeroInit(Chip8, .{});
+const Config = struct {
+    debug: bool = false,
+    set_vx_8xy: bool = false,
+};
+
+pub fn init(config: Config) Chip8 {
+    var c8 = std.mem.zeroInit(Chip8, .{ .config = config });
     // load font_set
     for (font_set, 0x50..) |f, i| {
         c8.memory[i] = f;
@@ -96,6 +102,7 @@ fn execute(self: *Chip8, opcode: u16) void {
             }
             //
         },
+        // Conditional skip registers: 5XY0
         0x5000 => {
             const vx, const vy, _ = getXYN(opcode);
             if (self.V[vx] == self.V[vy]) {
@@ -113,6 +120,62 @@ fn execute(self: *Chip8, opcode: u16) void {
             const reg, const value = getXNN(opcode);
             self.V[reg] += value;
             std.log.debug("{X}: {X}-{X}", .{ opcode, reg, value });
+        },
+        0x8000 => {
+            switch (opcode & 0x000F) {
+                0x0 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[vx] = self.V[vy];
+                },
+                0x1 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[vx] |= self.V[vy];
+                },
+                0x2 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[vx] &= self.V[vy];
+                },
+                0x3 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[vx] ^= self.V[vy];
+                },
+                // addition with overflow
+                0x4 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    const result, const overflow = @addWithOverflow(self.V[vx], self.V[vy]);
+                    self.V[vx] = result;
+                    self.V[0xF] = overflow;
+                },
+                // subtraction with underflow
+                0x5 => {
+                    self.V[0xF] = 1;
+                    const vx, const vy, _ = getXYN(opcode);
+                    const result, const overflow = @subWithOverflow(self.V[vx], self.V[vy]);
+                    self.V[vx] = result;
+                    self.V[0xF] ^= overflow;
+                },
+                // 0x6 => {
+                //     const vx, const vy, _ = getXYN(opcode);
+                // },
+                0x7 => {
+                    self.V[0xF] = 1;
+                    const vx, const vy, _ = getXYN(opcode);
+                    const result, const overflow = @subWithOverflow(self.V[vy], self.V[vx]);
+                    self.V[vx] = result;
+                    self.V[0xF] ^= overflow;
+                },
+                // 0xE => {
+                //     const vx, const vy, _ = getXYN(opcode);
+                // },
+                else => unreachable,
+            }
+        },
+        // Conditional skip registers: 9XY0
+        0x9000 => {
+            const vx, const vy, _ = getXYN(opcode);
+            if (self.V[vx] != self.V[vy]) {
+                self.pc += 2;
+            }
         },
         0xA000 => {
             self.I = opcode & 0x0FFF;
@@ -228,14 +291,79 @@ test "4XNN" {
     try std.testing.expect(c8.pc == (next_pc + 2));
 }
 
-//test "5XY0" {
-//    var c8 = Chip8.init();
-//}
+test "5XY0" {
+    var c8 = Chip8.init();
+    const initial_pc = c8.pc;
+    c8.V[0xA] = 0x3;
+    c8.V[0xB] = 0x3;
+    c8.execute(0x5AB0);
+    try std.testing.expect(c8.pc == (initial_pc + 2));
+
+    const next_pc = c8.pc;
+    c8.V[0xA] = 0x3;
+    c8.V[0xB] = 0x5;
+    c8.execute(0x5AB0);
+    try std.testing.expect(c8.pc == next_pc);
+}
 
 test "6XNN" {
     var c8 = Chip8.init();
-    c8.execute(0x6FA3);
-    try std.testing.expect(c8.V[0xF] == 0xA3);
+    c8.execute(0x6DA3);
+    try std.testing.expect(c8.V[0xD] == 0xA3);
+}
+
+test "8XY4" {
+    var c8 = Chip8.init();
+    c8.V[0xA] = 255;
+    c8.V[0xB] = 5;
+    c8.execute(0x8AB4);
+    try std.testing.expect(c8.V[0xA] == 0x4);
+    try std.testing.expect(c8.V[0xF] == 0x1);
+}
+
+test "8XY5" {
+    var c8 = Chip8.init();
+    c8.V[0xA] = 3;
+    c8.V[0xB] = 9;
+    c8.execute(0x8AB5);
+    try std.testing.expect(c8.V[0xA] == 0xFA);
+    try std.testing.expect(c8.V[0xF] == 0x0);
+
+    c8.V[0xA] = 255;
+    c8.V[0xB] = 3;
+    c8.execute(0x8AB5);
+    try std.testing.expect(c8.V[0xA] == 0xFC);
+    try std.testing.expect(c8.V[0xF] == 0x1);
+}
+
+test "8XY7" {
+    var c8 = Chip8.init();
+    c8.V[0x3] = 0x3;
+    c8.V[0x4] = 0x9;
+    c8.execute(0x8347);
+    try std.testing.expect(c8.V[0x3] == 0x6);
+    try std.testing.expect(c8.V[0xF] == 0x1);
+
+    c8.V[0x3] = 9;
+    c8.V[0x4] = 3;
+    c8.execute(0x8347);
+    try std.testing.expect(c8.V[0x3] == 0xFA);
+    try std.testing.expect(c8.V[0xF] == 0x0);
+}
+
+test "9XY0" {
+    var c8 = Chip8.init();
+    const initial_pc = c8.pc;
+    c8.V[0xA] = 0x3;
+    c8.V[0xB] = 0x3;
+    c8.execute(0x9AB0);
+    try std.testing.expect(c8.pc == initial_pc);
+
+    const next_pc = c8.pc;
+    c8.V[0xA] = 0x3;
+    c8.V[0xB] = 0x5;
+    c8.execute(0x9AB0);
+    try std.testing.expect(c8.pc == (next_pc + 2));
 }
 
 test "ANNN" {

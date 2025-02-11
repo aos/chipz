@@ -16,9 +16,9 @@ pub fn main() !void {
 
     // TODO: configurable debug output
 
-    var c8 = Chip8.init();
-    try c8.load(allocator, rom_path);
-    c8.start();
+    // const c8 = Chip8.init(.{ .debug = true });
+    // try c8.load(allocator, rom_path);
+    // c8.start();
 }
 
 test {
