@@ -18,7 +18,8 @@ config: Config = .{},
 
 const Config = struct {
     debug: bool = false,
-    set_vx_8xy: bool = false,
+    set_vx_8XY6E: bool = false,
+    set_vx_BNNN: bool = false,
 };
 
 pub fn init(config: Config) Chip8 {
@@ -71,7 +72,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.sp -= 1;
                     self.pc = self.stack[self.sp];
                 },
-                else => {},
+                else => unreachable,
             }
         },
         // goto: 1NNN
@@ -154,9 +155,16 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.V[vx] = result;
                     self.V[0xF] ^= overflow;
                 },
-                // 0x6 => {
-                //     const vx, const vy, _ = getXYN(opcode);
-                // },
+                0x6 => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[0xF] = 0;
+                    if (self.config.set_vx_8XY6E) {
+                        self.V[vx] = self.V[vy];
+                    }
+                    const overflow = (self.V[vx] & 0x1);
+                    self.V[0xF] ^= overflow;
+                    self.V[vx] >>= 1;
+                },
                 0x7 => {
                     self.V[0xF] = 1;
                     const vx, const vy, _ = getXYN(opcode);
@@ -164,9 +172,16 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.V[vx] = result;
                     self.V[0xF] ^= overflow;
                 },
-                // 0xE => {
-                //     const vx, const vy, _ = getXYN(opcode);
-                // },
+                0xE => {
+                    const vx, const vy, _ = getXYN(opcode);
+                    self.V[0xF] = 0;
+                    if (self.config.set_vx_8XY6E) {
+                        self.V[vx] = self.V[vy];
+                    }
+                    const result, const overflow = @shlWithOverflow(self.V[vx], 1);
+                    self.V[vx] = result;
+                    self.V[0xF] ^= overflow;
+                },
                 else => unreachable,
             }
         },
@@ -180,6 +195,21 @@ fn execute(self: *Chip8, opcode: u16) void {
         0xA000 => {
             self.I = opcode & 0x0FFF;
             std.log.debug("{X}: {X}", .{ opcode, self.I });
+        },
+        0xB000 => {
+            if (self.config.set_vx_BNNN) {
+                const reg, _ = getXNN(opcode);
+                const address = opcode & 0x0FFF;
+                self.pc = self.V[reg] + address;
+            } else {
+                const address = opcode & 0x0FFF;
+                self.pc = self.V[0] + address;
+            }
+        },
+        0xC000 => {
+            const vx, const n = getXNN(opcode);
+            const r = std.crypto.random.intRangeAtMostBiased(u8, 0, 255);
+            self.V[vx] = r & n;
         },
         // Draw (Vx, Vy, N): DXYN
         0xD000 => {
@@ -243,20 +273,20 @@ fn getXYN(opcode: u16) struct { u4, u4, u4 } {
 
 test "00E0" {
     const cleared = std.mem.zeroes([64 * 32]u8);
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     @memcpy(c8.gfx[0..5], &[_]u8{ 'h', 'e', 'l', 'l', 'o' });
     c8.execute(0x00E0);
     try std.testing.expectEqualSlices(u8, &c8.gfx, &cleared);
 }
 
 test "1NNN" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.execute(0x1345);
     try std.testing.expect(c8.pc == 0x0345);
 }
 
 test "subroutines: 2NNN -> 00EE" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.pc = 0x0345;
     // call subroutine
     c8.execute(0x2994);
@@ -266,7 +296,7 @@ test "subroutines: 2NNN -> 00EE" {
 }
 
 test "3XNN" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     const initial_pc = c8.pc;
     c8.V[0xD] = 0x55;
     c8.execute(0x3D55);
@@ -279,7 +309,7 @@ test "3XNN" {
 }
 
 test "4XNN" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     const initial_pc = c8.pc;
     c8.V[0xD] = 0x55;
     c8.execute(0x4D55);
@@ -292,7 +322,7 @@ test "4XNN" {
 }
 
 test "5XY0" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     const initial_pc = c8.pc;
     c8.V[0xA] = 0x3;
     c8.V[0xB] = 0x3;
@@ -307,13 +337,37 @@ test "5XY0" {
 }
 
 test "6XNN" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.execute(0x6DA3);
     try std.testing.expect(c8.V[0xD] == 0xA3);
 }
 
+test "8XY1" {
+    var c8 = Chip8.init(.{});
+    c8.V[0xA] = 0xF0;
+    c8.V[0xB] = 0x0F;
+    c8.execute(0x8AB1);
+    try std.testing.expect(c8.V[0xA] == 0xFF);
+}
+
+test "8XY2" {
+    var c8 = Chip8.init(.{});
+    c8.V[0xA] = 0xF0;
+    c8.V[0xB] = 0x0F;
+    c8.execute(0x8AB2);
+    try std.testing.expect(c8.V[0xA] == 0x0);
+}
+
+test "8XY3" {
+    var c8 = Chip8.init(.{});
+    c8.V[0xA] = 0xF0;
+    c8.V[0xB] = 0x0F;
+    c8.execute(0x8AB3);
+    try std.testing.expect(c8.V[0xA] == 0xFF);
+}
+
 test "8XY4" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.V[0xA] = 255;
     c8.V[0xB] = 5;
     c8.execute(0x8AB4);
@@ -322,7 +376,7 @@ test "8XY4" {
 }
 
 test "8XY5" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.V[0xA] = 3;
     c8.V[0xB] = 9;
     c8.execute(0x8AB5);
@@ -336,8 +390,21 @@ test "8XY5" {
     try std.testing.expect(c8.V[0xF] == 0x1);
 }
 
+test "8XY6" {
+    var c8 = Chip8.init(.{});
+    c8.V[0x3] = 0x3;
+    c8.execute(0x8346);
+    try std.testing.expect(c8.V[0x3] == 0x1);
+    try std.testing.expect(c8.V[0xF] == 0x1);
+
+    c8.V[0x3] = 0x2;
+    c8.execute(0x8346);
+    try std.testing.expect(c8.V[0x3] == 0x1);
+    try std.testing.expect(c8.V[0xF] == 0x0);
+}
+
 test "8XY7" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.V[0x3] = 0x3;
     c8.V[0x4] = 0x9;
     c8.execute(0x8347);
@@ -351,8 +418,21 @@ test "8XY7" {
     try std.testing.expect(c8.V[0xF] == 0x0);
 }
 
+test "8XYE" {
+    var c8 = Chip8.init(.{});
+    c8.V[0x3] = 0x1;
+    c8.execute(0x834E);
+    try std.testing.expect(c8.V[0x3] == 0x2);
+    try std.testing.expect(c8.V[0xF] == 0x0);
+
+    c8.V[0x3] = 0xF0;
+    c8.execute(0x834E);
+    try std.testing.expect(c8.V[0x3] == 0xE0);
+    try std.testing.expect(c8.V[0xF] == 0x1);
+}
+
 test "9XY0" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     const initial_pc = c8.pc;
     c8.V[0xA] = 0x3;
     c8.V[0xB] = 0x3;
@@ -367,9 +447,21 @@ test "9XY0" {
 }
 
 test "ANNN" {
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     c8.execute(0xA345);
     try std.testing.expect(c8.I == 0x0345);
+}
+
+test "BNNN" {
+    var c8 = Chip8.init(.{});
+    c8.V[0x2] = 0x3;
+    c8.execute(0xB220);
+    try std.testing.expect(c8.pc == 0x220);
+
+    c8.config.set_vx_BNNN = true;
+    c8.V[0x2] = 0x3;
+    c8.execute(0xB220);
+    try std.testing.expect(c8.pc == 0x223);
 }
 
 test "load rom into correct address" {
@@ -378,7 +470,7 @@ test "load rom into correct address" {
     const allocator = aa.allocator();
     defer aa.deinit();
 
-    var c8 = Chip8.init();
+    var c8 = Chip8.init(.{});
     try c8.load(allocator, rom_path);
 
     const file = try std.fs.cwd().openFile(rom_path, .{});
