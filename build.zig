@@ -11,6 +11,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const sdl_dep = b.dependency("sdl", .{
+        .target = target,
+        .optimize = optimize,
+        .preferred_link_mode = .static,
+    });
+    const sdl_lib = sdl_dep.artifact("SDL3");
+    // const sdl_test_lib = sdl_dep.artifact("SDL3_test");
+
+    exe.root_module.linkLibrary(sdl_lib);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
