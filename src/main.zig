@@ -5,15 +5,15 @@ const c = @cImport({
     @cDefine("SDL_DISABLE_OLD_NAMES", {});
     @cInclude("SDL3/SDL.h");
     @cInclude("SDL3/SDL_revision.h");
-
+    // For programs that provide their own entry points instead of relying on SDL's main function
+    // macro magic, 'SDL_MAIN_HANDLED' should be defined before including 'SDL_main.h'.
     @cDefine("SDL_MAIN_HANDLED", {});
     @cInclude("SDL3/SDL_main.h");
 });
 
 pub fn main() !void {
-    var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = aa.allocator();
-    defer aa.deinit();
+    // SDL STUFF
+    errdefer |err| if (err == error.SdlError) std.log.err("SDL error: {s}", .{c.SDL_GetError()});
 
     std.log.debug("SDL build time version: {d}.{d}.{d}", .{
         c.SDL_MAJOR_VERSION,
@@ -33,22 +33,15 @@ pub fn main() !void {
     }
 
     c.SDL_SetMainReady();
+    if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO | c.SDL_INIT_GAMEPAD)) {
+        std.debug.print("SDL error: {s}\n", .{c.SDL_GetError()});
+    }
 
-    try errify(c.SDL_SetAppMetadata("Speedbreaker", "0.0.0", "example.zig-examples.breakout"));
+    // SDL
 
-    try errify(c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO | c.SDL_INIT_GAMEPAD));
-    defer c.SDL_Quit();
-
-    std.log.debug("SDL video drivers: {}", .{fmtSdlDrivers(
-        c.SDL_GetCurrentVideoDriver().?,
-        c.SDL_GetNumVideoDrivers(),
-        c.SDL_GetVideoDriver,
-    )});
-    std.log.debug("SDL audio drivers: {}", .{fmtSdlDrivers(
-        c.SDL_GetCurrentAudioDriver().?,
-        c.SDL_GetNumAudioDrivers(),
-        c.SDL_GetAudioDriver,
-    )});
+    var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = aa.allocator();
+    defer aa.deinit();
 
     var it = try std.process.argsWithAllocator(allocator);
 
@@ -70,28 +63,6 @@ pub fn main() !void {
     //     }
     //     std.time.sleep(std.time.ns_per_s * 1);
     // }
-}
-
-
-/// Converts the return value of an SDL function to an error union.
-inline fn errify(value: anytype) error{SdlError}!switch (@import("shims").typeInfo(@TypeOf(value))) {
-    .bool => void,
-    .pointer, .optional => @TypeOf(value.?),
-    .int => |info| switch (info.signedness) {
-        .signed => @TypeOf(@max(0, value)),
-        .unsigned => @TypeOf(value),
-    },
-    else => @compileError("unerrifiable type: " ++ @typeName(@TypeOf(value))),
-} {
-    return switch (@import("shims").typeInfo(@TypeOf(value))) {
-        .bool => if (!value) error.SdlError,
-        .pointer, .optional => value orelse error.SdlError,
-        .int => |info| switch (info.signedness) {
-            .signed => if (value >= 0) @max(0, value) else error.SdlError,
-            .unsigned => if (value != 0) value else error.SdlError,
-        },
-        else => comptime unreachable,
-    };
 }
 
 test {
