@@ -25,6 +25,7 @@
           nativeBuildInputs = with pkgs; [
             zig_0_13
             zls
+            SDL2
           ];
         };
       }

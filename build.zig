@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const sdl = b.lazyDependency("sdl", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "chipz",
         .root_source_file = b.path("src/main.zig"),
@@ -11,19 +16,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const sdl_dep = b.dependency("sdl", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const sdl_lib = sdl_dep.artifact("SDL3");
-    exe.root_module.linkLibrary(sdl_lib);
+    if (target.result.os.tag == .linux) {
+        exe.linkSystemLibrary("SDL2");
+        exe.linkLibC();
+    } else {
+        exe.linkLibrary(sdl.?.artifact("SDL2"));
+    }
 
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
-
     run_cmd.step.dependOn(b.getInstallStep());
 
+    // This allows the user to pass arguments to the application in the build
+    // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }

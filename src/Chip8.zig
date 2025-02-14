@@ -52,7 +52,7 @@ pub fn start(self: *Chip8) void {
     }
 }
 
-fn step(self: *Chip8) void {
+pub fn step(self: *Chip8) void {
     const opcode = @as(u16, self.memory[self.pc]) << 8 | self.memory[self.pc + 1];
     self.pc += 2;
 
