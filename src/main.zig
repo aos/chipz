@@ -1,6 +1,8 @@
 const std = @import("std");
+const c = @import("c.zig");
 const Chip8 = @import("Chip8.zig");
-const sdl = @import("demo_sdl.zig");
+const Sdl = @import("Sdl.zig");
+// const sdl = @import("demo_sdl.zig");
 
 pub fn main() !void {
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -15,21 +17,45 @@ pub fn main() !void {
 
     std.debug.print("rom_path: {s}\n", .{rom_path});
 
-    // sdl.run_demo();
+    // Init emulator and load ROM
+    var c8 = Chip8.init(.{ .debug = true });
+    try c8.load(allocator, rom_path);
+
+    // Init SDL
+    var sdl = try Sdl.init(.{});
+    defer sdl.deinit();
+    sdl.clear();
+    sdl.render();
+
+    main_loop: while (true) {
+
+        // Process SDL events
+        {
+            var event: c.SDL_Event = undefined;
+            while (c.SDL_PollEvent(&event) != 0) {
+                switch (event.type) {
+                    c.SDL_QUIT => break :main_loop,
+                    else => {
+                        std.debug.print("Got event: {any}\n", .{event.type});
+                    },
+                }
+            }
+
+            c.SDL_Delay(17);
+        }
+
+        // Game engine
+        c8.step();
+        if (c8.draw_flag) {
+            // draw something using SDL
+            sdl.update(&c8.gfx);
+            sdl.render();
+            c8.draw_flag = false;
+        }
+        std.time.sleep(std.time.ns_per_s * 1);
+    }
 
     // TODO: configurable debug output
-
-    // var c8 = Chip8.init(.{ .debug = true });
-    // try c8.load(allocator, rom_path);
-    // while (true) {
-    //     c8.step();
-    //     if (c8.draw_flag) {
-    //         c8.print();
-    //         // draw something using SDL
-    //         c8.draw_flag = false;
-    //     }
-    //     std.time.sleep(std.time.ns_per_s * 1);
-    // }
 }
 
 test {
