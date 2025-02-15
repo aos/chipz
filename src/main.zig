@@ -1,6 +1,6 @@
 const std = @import("std");
 const Chip8 = @import("Chip8.zig");
-const sdl = @import("Sdl.zig");
+const sdl = @import("demo_sdl.zig");
 
 pub fn main() !void {
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -19,17 +19,17 @@ pub fn main() !void {
 
     // TODO: configurable debug output
 
-    var c8 = Chip8.init(.{ .debug = true });
-    try c8.load(allocator, rom_path);
-    while (true) {
-        c8.step();
-        if (c8.draw_flag) {
-            c8.print();
-            // draw something using SDL
-            c8.draw_flag = false;
-        }
-        std.time.sleep(std.time.ns_per_s * 1);
-    }
+    // var c8 = Chip8.init(.{ .debug = true });
+    // try c8.load(allocator, rom_path);
+    // while (true) {
+    //     c8.step();
+    //     if (c8.draw_flag) {
+    //         c8.print();
+    //         // draw something using SDL
+    //         c8.draw_flag = false;
+    //     }
+    //     std.time.sleep(std.time.ns_per_s * 1);
+    // }
 }
 
 test {
