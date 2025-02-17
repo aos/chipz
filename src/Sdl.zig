@@ -12,6 +12,7 @@ const Config = struct {
 window: *c.SDL_Window,
 renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
+rgba_buffer: [64 * 32]u32,
 
 pub fn init(config: Config) !Sdl {
     _ = try errify(c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_EVENTS | c.SDL_INIT_AUDIO));
@@ -46,21 +47,19 @@ pub fn init(config: Config) !Sdl {
         .window = window,
         .renderer = renderer,
         .texture = texture,
+        .rgba_buffer = std.mem.zeroes([64 * 32]u32),
     };
 }
 
-pub fn update(self: *Sdl, pixels: *[64 * 32]u8) void {
-    var rgba_buffer = std.mem.zeroes([64 * 32]u32);
+pub fn render(self: *Sdl, pixels: *[64 * 32]u1) void {
+    @memset(&self.rgba_buffer, 0);
     for (pixels, 0..) |p, i| {
         if (p == 1) {
-            rgba_buffer[i] = 0xFFFFFFFF;
+            self.rgba_buffer[i] = 0xFFFFFFFF;
         }
     }
 
-    _ = c.SDL_UpdateTexture(self.texture, null, &rgba_buffer, 64 * @sizeOf(u32));
-}
-
-pub fn render(self: *Sdl) void {
+    _ = c.SDL_UpdateTexture(self.texture, null, &self.rgba_buffer, 64 * @sizeOf(u32));
     _ = c.SDL_RenderClear(self.renderer);
     _ = c.SDL_RenderCopy(self.renderer, self.texture, null, null);
     c.SDL_RenderPresent(self.renderer);

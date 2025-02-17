@@ -29,7 +29,7 @@ pub fn main() !void {
     // Init SDL
     var sdl = try Sdl.init(.{ .pixel_size = 16 });
     defer sdl.deinit();
-    sdl.render();
+    sdl.render(&c8.gfx);
 
     main_loop: while (true) {
         // Process SDL events
@@ -51,13 +51,11 @@ pub fn main() !void {
         {
             c8.step();
             if (c8.draw_flag) {
-                // draw something using SDL
-                sdl.update(&c8.gfx);
-                sdl.render();
+                sdl.render(&c8.gfx);
                 c8.draw_flag = false;
             }
         }
-        std.time.sleep(std.time.ns_per_s * 1);
+        std.time.sleep(std.time.ns_per_s / 60);
     }
 }
 

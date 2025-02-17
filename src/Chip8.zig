@@ -3,10 +3,10 @@ const font_set = @import("font_set.zig").font_set;
 
 const Chip8 = @This();
 
-memory: [4096]u8,
-gfx: [64 * 32]u8,
+memory: [4096]u8, // 0xFFF
+gfx: [64 * 32]u1,
 stack: [16]u16,
-key: [16]u8,
+key: ?u4 = null, // 0 - F
 pc: u16 = 0x200, // Program counter starts at 0x200
 V: [16]u8,
 I: u16,
@@ -20,6 +20,7 @@ const Config = struct {
     debug: bool = false,
     set_vx_8XY6E: bool = false,
     set_vx_BNNN: bool = false,
+    inc_i_FX55: bool = false,
 };
 
 pub fn init(config: Config) Chip8 {
@@ -55,7 +56,6 @@ pub fn start(self: *Chip8) void {
 pub fn step(self: *Chip8) void {
     const opcode = @as(u16, self.memory[self.pc]) << 8 | self.memory[self.pc + 1];
     self.pc += 2;
-
     self.execute(opcode);
 }
 
@@ -72,7 +72,9 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.sp -= 1;
                     self.pc = self.stack[self.sp];
                 },
-                else => unreachable,
+                else => {
+                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                },
             }
         },
         // goto: 1NNN
@@ -119,7 +121,7 @@ fn execute(self: *Chip8, opcode: u16) void {
         // Add value to register: 7XNN
         0x7000 => {
             const reg, const value = getXNN(opcode);
-            self.V[reg] += value;
+            self.V[reg], _ = @addWithOverflow(self.V[reg], value);
             std.log.debug("{X}: {X}-{X}", .{ opcode, reg, value });
         },
         0x8000 => {
@@ -182,7 +184,9 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.V[vx] = result;
                     self.V[0xF] ^= overflow;
                 },
-                else => unreachable,
+                else => {
+                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                },
             }
         },
         // Conditional skip registers: 9XY0
@@ -192,10 +196,12 @@ fn execute(self: *Chip8, opcode: u16) void {
                 self.pc += 2;
             }
         },
+        // Set index register: ANNN
         0xA000 => {
             self.I = opcode & 0x0FFF;
             std.log.debug("{X}: {X}", .{ opcode, self.I });
         },
+        // Jump with offset: BNNN
         0xB000 => {
             if (self.config.set_vx_BNNN) {
                 const reg, _ = getXNN(opcode);
@@ -206,6 +212,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                 self.pc = self.V[0] + address;
             }
         },
+        // Random: CNNN
         0xC000 => {
             const vx, const n = getXNN(opcode);
             const r = std.crypto.random.intRangeAtMostBiased(u8, 0, 255);
@@ -235,7 +242,100 @@ fn execute(self: *Chip8, opcode: u16) void {
             }
             self.draw_flag = true;
         },
-        else => unreachable,
+        // Skip if key: EX..
+        0xE000 => {
+            switch (opcode & 0x00FF) {
+                0x009E => {
+                    const reg, _ = getXNN(opcode);
+                    if (self.key) |k| if (self.V[reg] == k) {
+                        self.pc += 2;
+                    };
+                },
+                0x00A1 => {
+                    const reg, _ = getXNN(opcode);
+                    if (self.key) |k| if (self.V[reg] != k) {
+                        self.pc += 2;
+                    };
+                },
+                else => {
+                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                },
+            }
+        },
+        0xF000 => {
+            switch (opcode & 0x00FF) {
+                0x0007 => {
+                    const reg, _ = getXNN(opcode);
+                    self.V[reg] = self.delay_timer;
+                },
+                0x0015 => {
+                    const reg, _ = getXNN(opcode);
+                    self.delay_timer = self.V[reg];
+                },
+                0x0018 => {
+                    const reg, _ = getXNN(opcode);
+                    self.sound_timer = self.V[reg];
+                },
+                0x001E => {
+                    const reg, _ = getXNN(opcode);
+                    const add = self.I + self.V[reg];
+                    if ((add & 0x1000) >= 0x1000) {
+                        self.V[0xF] = 1;
+                    }
+                    self.I = add;
+                },
+                0x000A => {
+                    if (self.key) |k| {
+                        const reg, _ = getXNN(opcode);
+                        self.V[reg] = k;
+                    } else {
+                        self.pc -= 2;
+                    }
+                },
+                0x0029 => {
+                    const reg, _ = getXNN(opcode);
+                    const char = self.V[reg];
+                    self.I = self.memory[0x50] + char;
+                },
+                0x0033 => {
+                    const reg, _ = getXNN(opcode);
+                    const num = self.V[reg];
+                    var n: u8 = 1;
+                    while (n < 4) : (n += 1) {
+                        const power = std.math.pow(u16, 10, n);
+                        const new = @mod(num, power);
+                        const final = @divTrunc(new, power / 10);
+                        self.memory[self.I + (3 - n)] = @intCast(final);
+                    }
+                },
+                0x0055 => {
+                    const reg, _ = getXNN(opcode);
+                    var x: u8 = 0;
+                    while (x <= reg) : (x += 1) {
+                        self.memory[self.I + x] = self.V[x];
+                    }
+                    if (self.config.inc_i_FX55) {
+                        self.I = reg + x + 1;
+                    }
+                },
+                0x0065 => {
+                    const reg, _ = getXNN(opcode);
+                    var x: u8 = 0;
+                    while (x <= reg) : (x += 1) {
+                        self.V[x] = self.memory[self.I + x];
+                    }
+                    if (self.config.inc_i_FX55) {
+                        self.I = reg + x + 1;
+                    }
+                },
+                else => {
+                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                },
+            }
+        },
+        else => {
+            std.debug.print("unknown instruction: {any}\n", .{opcode});
+        },
     }
 }
 
@@ -272,11 +372,11 @@ fn getXYN(opcode: u16) struct { u4, u4, u4 } {
 }
 
 test "00E0" {
-    const cleared = std.mem.zeroes([64 * 32]u8);
+    const cleared = std.mem.zeroes([64 * 32]u1);
     var c8 = Chip8.init(.{});
-    @memcpy(c8.gfx[0..5], &[_]u8{ 'h', 'e', 'l', 'l', 'o' });
+    @memcpy(c8.gfx[0..5], &[_]u1{ 1, 0, 0, 0, 1 });
     c8.execute(0x00E0);
-    try std.testing.expectEqualSlices(u8, &c8.gfx, &cleared);
+    try std.testing.expectEqualSlices(u1, &c8.gfx, &cleared);
 }
 
 test "1NNN" {
@@ -462,6 +562,85 @@ test "BNNN" {
     c8.V[0x2] = 0x3;
     c8.execute(0xB220);
     try std.testing.expect(c8.pc == 0x223);
+}
+
+test "CXNN" {
+    var c8 = Chip8.init(.{});
+    const num = 33;
+    c8.V[9] = num;
+    c8.execute(0xC945);
+
+    try std.testing.expect(c8.V[9] != num);
+}
+
+// TODO: How to test draw (DXYN)?
+
+test "EX9E" {
+    var c8 = Chip8.init(.{});
+    const current_pc = c8.pc;
+    c8.key = 0xF;
+    c8.V[0x2] = 0xF;
+    c8.execute(0xE29E);
+    try std.testing.expect(c8.pc == current_pc + 2);
+}
+
+test "EXA1" {
+    var c8 = Chip8.init(.{});
+    const current_pc = c8.pc;
+    c8.key = 0xE;
+    c8.V[0x2] = 0xF;
+    c8.execute(0xE2A1);
+    try std.testing.expect(c8.pc == current_pc + 2);
+}
+
+test "FX33" {
+    var c8 = Chip8.init(.{});
+    c8.I = 0x4FE;
+    c8.V[0x2] = 0xF3; // 243
+    c8.execute(0xF233);
+    try std.testing.expectEqualSlices(
+        u8,
+        c8.memory[c8.I .. c8.I + 3],
+        &[_]u8{ 2, 4, 3 },
+    );
+}
+
+test "FX55" {
+    var c8 = Chip8.init(.{});
+    c8.I = 0x6FE;
+    var n: u8 = 0;
+    while (n < 10) : (n += 1) {
+        c8.V[n] = n;
+    }
+
+    c8.execute(0xF955);
+    try std.testing.expectEqualSlices(
+        u8,
+        c8.memory[c8.I .. c8.I + 10],
+        &[_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 },
+    );
+}
+
+test "FX65" {
+    var c8 = Chip8.init(.{});
+    c8.I = 0x6FE;
+    var n: u8 = 0;
+    while (n < 10) : (n += 1) {
+        c8.memory[c8.I + n] = n;
+    }
+    c8.execute(0xF965);
+
+    var expected = [_]u8{0} ** 10;
+    var y: u8 = 0;
+    while (y < 10) : (y += 1) {
+        expected[y] = c8.V[y];
+    }
+
+    try std.testing.expectEqualSlices(
+        u8,
+        c8.memory[c8.I .. c8.I + 10],
+        &expected,
+    );
 }
 
 test "load rom into correct address" {
