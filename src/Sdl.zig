@@ -12,76 +12,49 @@ const Config = struct {
 window: *c.SDL_Window,
 renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
-src_rect: *c.SDL_Rect,
-scaling_rect: *c.SDL_Rect,
 
 pub fn init(config: Config) !Sdl {
-    std.debug.print("Config: {any}\n", .{config});
-
-    if (c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_EVENTS | c.SDL_INIT_AUDIO) < 0)
-        return error.SDLInitFailed;
+    _ = try errify(c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_EVENTS | c.SDL_INIT_AUDIO));
 
     const virtual_width = config.width * config.pixel_size;
     const virtual_height = config.height * config.pixel_size;
 
-    const window = c.SDL_CreateWindow(
+    const window = try errify(c.SDL_CreateWindow(
         "chipz",
         c.SDL_WINDOWPOS_CENTERED,
         c.SDL_WINDOWPOS_CENTERED,
         virtual_width,
         virtual_height,
         c.SDL_WINDOW_SHOWN,
-    ) orelse return error.SDLInitFailed;
+    ));
 
-    const renderer = c.SDL_CreateRenderer(
+    const renderer = try errify(c.SDL_CreateRenderer(
         window,
         -1,
         c.SDL_RENDERER_ACCELERATED,
-    ) orelse return error.SDLInitFailed;
+    ));
 
-    const texture = c.SDL_CreateTexture(
+    const texture = try errify(c.SDL_CreateTexture(
         renderer,
-        c.SDL_PIXELFORMAT_ARGB8888,
+        c.SDL_PIXELFORMAT_RGBA8888,
         c.SDL_TEXTUREACCESS_STATIC,
         config.width,
         config.height,
-    ) orelse {
-        c.SDL_Log("Unable to create texture: %s", c.SDL_GetError());
-        return error.SDLInitFailed;
-    };
-
-    var src_rect = c.SDL_Rect{
-        .x = 0,
-        .y = 0,
-        .w = config.width,
-        .h = config.height,
-    };
-
-    var scaling_rect = c.SDL_Rect{
-        .x = 0,
-        .y = 0,
-        .w = virtual_width,
-        .h = virtual_height,
-    };
+    ));
 
     return Sdl{
         .window = window,
         .renderer = renderer,
         .texture = texture,
-        .src_rect = &src_rect,
-        .scaling_rect = &scaling_rect,
     };
 }
 
-pub fn clear(self: *Sdl) void {
-    _ = c.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
-    _ = c.SDL_RenderClear(self.renderer);
-}
-
 pub fn update(self: *Sdl, pixels: *[64 * 32]u8) void {
-    var rgba_buffer: [64 * 32]u32 = undefined;
+    var rgba_buffer = std.mem.zeroes([64 * 32]u32);
     for (pixels, 0..) |p, i| {
-        rgba_buffer[i] = (@as(u32, 0xFF) << 24) | (@as(u32, p) << 16) | (@as(u32, p) << 8) | p;
+        if (p == 1) {
+            rgba_buffer[i] = 0xFFFFFFFF;
+        }
     }
 
     _ = c.SDL_UpdateTexture(self.texture, null, &rgba_buffer, 64 * @sizeOf(u32));
@@ -89,7 +62,7 @@ pub fn update(self: *Sdl, pixels: *[64 * 32]u8) void {
 
 pub fn render(self: *Sdl) void {
     _ = c.SDL_RenderClear(self.renderer);
-    _ = c.SDL_RenderCopy(self.renderer, self.texture, self.src_rect, self.scaling_rect);
+    _ = c.SDL_RenderCopy(self.renderer, self.texture, null, null);
     c.SDL_RenderPresent(self.renderer);
 }
 
@@ -104,7 +77,7 @@ pub fn deinit(self: *Sdl) void {
 inline fn errify(value: anytype) error{SdlError}!switch (@typeInfo(@TypeOf(value))) {
     .Bool => void,
     .Pointer, .Optional => @TypeOf(value.?),
-    .Int => |info| switch (info.Signedness) {
+    .Int => |info| switch (info.signedness) {
         .signed => @TypeOf(@max(0, value)),
         .unsigned => @TypeOf(value),
     },
@@ -113,7 +86,7 @@ inline fn errify(value: anytype) error{SdlError}!switch (@typeInfo(@TypeOf(value
     return switch (@typeInfo(@TypeOf(value))) {
         .Bool => if (!value) error.SdlError,
         .Pointer, .Optional => value orelse error.SdlError,
-        .Int => |info| switch (info.Signedness) {
+        .Int => |info| switch (info.signedness) {
             .signed => if (value >= 0) @max(0, value) else error.SdlError,
             .unsigned => if (value != 0) value else error.SdlError,
         },

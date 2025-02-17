@@ -2,9 +2,14 @@ const std = @import("std");
 const c = @import("c.zig");
 const Chip8 = @import("Chip8.zig");
 const Sdl = @import("Sdl.zig");
-// const sdl = @import("demo_sdl.zig");
 
 pub fn main() !void {
+    // TODO: configurable debug output
+
+    errdefer |err| if (err == error.SdlError) {
+        std.debug.print("SDL error: {s}\n", .{c.SDL_GetError()});
+    };
+
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = aa.allocator();
     defer aa.deinit();
@@ -22,13 +27,11 @@ pub fn main() !void {
     try c8.load(allocator, rom_path);
 
     // Init SDL
-    var sdl = try Sdl.init(.{});
+    var sdl = try Sdl.init(.{ .pixel_size = 16 });
     defer sdl.deinit();
-    sdl.clear();
     sdl.render();
 
     main_loop: while (true) {
-
         // Process SDL events
         {
             var event: c.SDL_Event = undefined;
@@ -45,17 +48,17 @@ pub fn main() !void {
         }
 
         // Game engine
-        c8.step();
-        if (c8.draw_flag) {
-            // draw something using SDL
-            sdl.update(&c8.gfx);
-            sdl.render();
-            c8.draw_flag = false;
+        {
+            c8.step();
+            if (c8.draw_flag) {
+                // draw something using SDL
+                sdl.update(&c8.gfx);
+                sdl.render();
+                c8.draw_flag = false;
+            }
         }
         std.time.sleep(std.time.ns_per_s * 1);
     }
-
-    // TODO: configurable debug output
 }
 
 test {
