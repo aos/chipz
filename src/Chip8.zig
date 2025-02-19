@@ -17,13 +17,13 @@ draw_flag: bool,
 config: Config = .{},
 
 const Config = struct {
-    debug: bool = false,
     set_vx_8XY6E: bool = false,
     set_vx_BNNN: bool = false,
     inc_i_FX55: bool = false,
 };
 
 pub fn init(config: Config) Chip8 {
+    std.log.debug("chip8: init - config: {any}", .{config});
     var c8 = std.mem.zeroInit(Chip8, .{ .config = config });
     // load font_set
     for (font_set, 0x50..) |f, i| {
@@ -33,6 +33,7 @@ pub fn init(config: Config) Chip8 {
 }
 
 pub fn load(self: *Chip8, allocator: std.mem.Allocator, rom_path: []const u8) !void {
+    std.log.debug("loading rom: {s}", .{rom_path});
     const file = try std.fs.cwd().openFile(rom_path, .{});
     defer file.close();
     const stat = try file.stat();
@@ -66,20 +67,23 @@ fn execute(self: *Chip8, opcode: u16) void {
                 // clear screen
                 0x00E0 => {
                     @memset(&self.gfx, 0);
+                    std.log.debug("[{X}]", .{opcode});
                 },
                 0x00EE => {
                     // "pop" the last address from the stack
                     self.sp -= 1;
                     self.pc = self.stack[self.sp];
+                    std.log.debug("[{X}]\tpc: {X}", .{ opcode, self.pc });
                 },
                 else => {
-                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                    std.log.warn("unknown instruction: {X}\n", .{opcode});
                 },
             }
         },
         // goto: 1NNN
         0x1000 => {
             self.pc = opcode & 0x0FFF;
+            std.log.debug("[{X}]\tpc: {X}", .{ opcode, self.pc });
         },
         // Calls subroutine: 2NNN
         0x2000 => {
@@ -89,6 +93,12 @@ fn execute(self: *Chip8, opcode: u16) void {
             // "call" the subroutine at address
             // returning via 00EE
             self.pc = opcode & 0x0FFF;
+
+            std.log.debug("[{X}]\told pc: {X}\tnew pc: {X}", .{
+                opcode,
+                self.stack[self.sp - 1],
+                self.pc,
+            });
         },
         // Conditional skip if true: 3XNN
         0x3000 => {
@@ -103,7 +113,6 @@ fn execute(self: *Chip8, opcode: u16) void {
             if (self.V[reg] != value) {
                 self.pc += 2;
             }
-            //
         },
         // Conditional skip registers: 5XY0
         0x5000 => {
@@ -116,13 +125,11 @@ fn execute(self: *Chip8, opcode: u16) void {
         0x6000 => {
             const reg, const value = getXNN(opcode);
             self.V[reg] = value;
-            std.log.debug("{X}: {X}-{X}", .{ opcode, reg, value });
         },
         // Add value to register: 7XNN
         0x7000 => {
             const reg, const value = getXNN(opcode);
             self.V[reg], _ = @addWithOverflow(self.V[reg], value);
-            std.log.debug("{X}: {X}-{X}", .{ opcode, reg, value });
         },
         0x8000 => {
             switch (opcode & 0x000F) {
@@ -185,7 +192,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                     self.V[0xF] ^= overflow;
                 },
                 else => {
-                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                    std.log.warn("unknown instruction: {X}\n", .{opcode});
                 },
             }
         },
@@ -199,7 +206,7 @@ fn execute(self: *Chip8, opcode: u16) void {
         // Set index register: ANNN
         0xA000 => {
             self.I = opcode & 0x0FFF;
-            std.log.debug("{X}: {X}", .{ opcode, self.I });
+            std.log.debug("[{X}]\t{X}", .{ opcode, self.I });
         },
         // Jump with offset: BNNN
         0xB000 => {
@@ -209,6 +216,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                 self.pc = self.V[reg] + address;
             } else {
                 const address = opcode & 0x0FFF;
+                std.log.debug("[{X}]\t{X}", .{ opcode, address });
                 self.pc = self.V[0] + address;
             }
         },
@@ -258,7 +266,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                     };
                 },
                 else => {
-                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                    std.log.warn("unknown instruction: {X}\n", .{opcode});
                 },
             }
         },
@@ -289,6 +297,7 @@ fn execute(self: *Chip8, opcode: u16) void {
                         const reg, _ = getXNN(opcode);
                         self.V[reg] = k;
                     } else {
+                        std.log.debug("[{X}]", .{opcode});
                         self.pc -= 2;
                     }
                 },
@@ -329,12 +338,12 @@ fn execute(self: *Chip8, opcode: u16) void {
                     }
                 },
                 else => {
-                    std.debug.print("unknown instruction: {any}\n", .{opcode});
+                    std.log.warn("unknown instruction: {X}\n", .{opcode});
                 },
             }
         },
         else => {
-            std.debug.print("unknown instruction: {any}\n", .{opcode});
+            std.log.warn("unknown instruction: {X}\n", .{opcode});
         },
     }
 }
@@ -361,6 +370,9 @@ fn getLowerBits(comptime T: type, opcode: u16) T {
 fn getXNN(opcode: u16) struct { u4, u8 } {
     const reg = getLowerBits(u4, opcode >> 8);
     const value = getLowerBits(u8, opcode);
+
+    std.log.debug("[{X}]\treg: {X}\tvalue: {X}", .{ opcode, reg, value });
+
     return .{ reg, value };
 }
 
@@ -368,6 +380,9 @@ fn getXYN(opcode: u16) struct { u4, u4, u4 } {
     const vx = getLowerBits(u4, opcode >> 8);
     const vy = getLowerBits(u4, opcode >> 4);
     const n = getLowerBits(u4, opcode);
+
+    std.log.debug("[{X}]\tx: {X}\ty: {X}\tn: {X}", .{ opcode, vx, vy, n });
+
     return .{ vx, vy, n };
 }
 
