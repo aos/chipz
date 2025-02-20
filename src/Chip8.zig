@@ -6,7 +6,7 @@ const Chip8 = @This();
 memory: [4096]u8, // 0xFFF
 gfx: [64 * 32]u1,
 stack: [16]u16,
-key: ?u4 = null, // 0 - F
+keys: [16]bool, // 0 - F
 pc: u16 = 0x200, // Program counter starts at 0x200
 V: [16]u8,
 I: u16,
@@ -17,6 +17,7 @@ draw_flag: bool,
 config: Config = .{},
 
 const Config = struct {
+    opcodes_per_frame: usize = 10,
     set_vx_8XY6E: bool = false,
     set_vx_BNNN: bool = false,
     inc_i_FX55: bool = false,
@@ -58,6 +59,16 @@ pub fn step(self: *Chip8) void {
     const opcode = @as(u16, self.memory[self.pc]) << 8 | self.memory[self.pc + 1];
     self.pc += 2;
     self.execute(opcode);
+}
+
+pub fn stepTimers(self: *Chip8) void {
+    if (self.delay_timer > 0) {
+        self.delay_timer -= 1;
+    }
+
+    if (self.sound_timer > 0) {
+        self.sound_timer -= 1;
+    }
 }
 
 fn execute(self: *Chip8, opcode: u16) void {
@@ -250,20 +261,22 @@ fn execute(self: *Chip8, opcode: u16) void {
             }
             self.draw_flag = true;
         },
-        // Skip if key: EX..
+        // Skip if key: EX9E/EX0A
         0xE000 => {
             switch (opcode & 0x00FF) {
                 0x009E => {
                     const reg, _ = getXNN(opcode);
-                    if (self.key) |k| if (self.V[reg] == k) {
+                    const k = self.V[reg];
+                    if (self.keys[k]) {
                         self.pc += 2;
-                    };
+                    }
                 },
                 0x00A1 => {
                     const reg, _ = getXNN(opcode);
-                    if (self.key) |k| if (self.V[reg] != k) {
+                    const k = self.V[reg];
+                    if (!self.keys[k]) {
                         self.pc += 2;
-                    };
+                    }
                 },
                 else => {
                     std.log.warn("unknown instruction: {X}\n", .{opcode});
@@ -292,10 +305,17 @@ fn execute(self: *Chip8, opcode: u16) void {
                     }
                     self.I = add;
                 },
+                // Wait for key input: FX0A
+                // FIXME: this only works to find the first key
+                // what happens if we want multiple keys?
                 0x000A => {
-                    if (self.key) |k| {
+                    const key_index: ?u8 = for (self.keys, 0..) |k, i| {
+                        if (k) break @intCast(i);
+                    } else null;
+
+                    if (key_index) |idx| {
                         const reg, _ = getXNN(opcode);
-                        self.V[reg] = k;
+                        self.V[reg] = idx;
                     } else {
                         std.log.debug("[{X}]", .{opcode});
                         self.pc -= 2;
@@ -593,7 +613,7 @@ test "CXNN" {
 test "EX9E" {
     var c8 = Chip8.init(.{});
     const current_pc = c8.pc;
-    c8.key = 0xF;
+    c8.keys[0xF] = true;
     c8.V[0x2] = 0xF;
     c8.execute(0xE29E);
     try std.testing.expect(c8.pc == current_pc + 2);
@@ -602,7 +622,7 @@ test "EX9E" {
 test "EXA1" {
     var c8 = Chip8.init(.{});
     const current_pc = c8.pc;
-    c8.key = 0xE;
+    c8.keys[0xE] = true;
     c8.V[0x2] = 0xF;
     c8.execute(0xE2A1);
     try std.testing.expect(c8.pc == current_pc + 2);

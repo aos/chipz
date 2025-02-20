@@ -30,44 +30,37 @@ pub fn main() !void {
     main_loop: while (true) {
         // Process SDL events
         {
-            var event: c.SDL_Event = undefined;
-            while (c.SDL_PollEvent(&event) != 0) {
-                switch (event.type) {
-                    c.SDL_QUIT => break :main_loop,
-                    c.SDL_KEYDOWN => {
-                        switch (event.key.keysym.scancode) {
-                            c.SDL_SCANCODE_1 => {
-                                std.debug.print("Number 1 pressed!\n", .{});
-                            },
-                            else => {},
-                        }
-                    },
-                    c.SDL_KEYUP => {
-                        c8.key = null;
-                    },
-                    else => {
-                        // std.debug.print("Got event: {any}\n", .{event.type});
-                    },
+            while (sdl.poll()) |event| {
+                switch (event) {
+                    Sdl.EventType.quit => break :main_loop,
+                    else => {},
                 }
             }
         }
 
-        // const key = std.mem.span(c.SDL_GetKeyboardState(null));
-        // std.debug.print("key: {any}\n", .{key});
+        sdl.updateInput(&c8.keys);
 
         // Game engine
         {
-            c8.step();
+            // Cheat a bit and run more opcodes per frame
+            for (0..c8.config.opcodes_per_frame + 1) |_| {
+                c8.step();
+            }
+
+            c8.stepTimers();
+
             if (c8.draw_flag) {
                 try sdl.render(&c8.gfx);
                 c8.draw_flag = false;
             }
+
+            if (c8.sound_timer > 0) {
+                try sdl.playSound();
+            }
         }
 
         // Run at 60 FPS...
-
-        c.SDL_Delay(1000 / 60);
-        // std.time.sleep(std.time.ns_per_s / 60);
+        std.time.sleep(std.time.ns_per_s / 60);
     }
 }
 
