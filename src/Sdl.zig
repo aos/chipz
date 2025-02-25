@@ -141,8 +141,8 @@ pub fn poll(_: *Sdl) ?EventType {
 pub fn updateInput(_: *Sdl, input: []bool) void {
     std.log.debug("sdl: update input", .{});
     const state = c.SDL_GetKeyboardState(null);
-    for (SupportedKeys, 0..) |k, i| {
-        input[i] = state[@intCast(k)] == 1;
+    for (SupportedKeys, input) |k, *i| {
+        i.* = state[@intCast(k)] == 1;
     }
 }
 
