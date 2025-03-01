@@ -5,6 +5,8 @@ tested anyway) and passes most tests.
 
 It uses SDL2 as the rendering/sound/input engine.
 
+![demo](./demo.webm)
+
 ### Development
 
 There is a `nix` flake. Grab a shell with:
