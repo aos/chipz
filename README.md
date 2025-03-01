@@ -5,7 +5,7 @@ tested anyway) and passes most tests.
 
 It uses SDL2 as the rendering/sound/input engine.
 
-![demo](./demo.webm)
+[demo.webm](https://github.com/user-attachments/assets/5c61aacd-1fdc-44d6-b87d-50f191be7004)
 
 ### Development
 
